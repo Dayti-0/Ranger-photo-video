@@ -9,6 +9,11 @@ import shutil
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+except ImportError:
+    pass
 import cv2
 from pathlib import Path
 from typing import List, Optional
@@ -16,7 +21,7 @@ import threading
 
 
 # Extensions supportées
-IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.heic'}
+IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.heic', '.heif'}
 VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v', '.3gp'}
 MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 
@@ -481,7 +486,7 @@ def main():
         import cv2
     except ImportError as e:
         print("Dépendances manquantes. Installez-les avec:")
-        print("pip install pillow opencv-python")
+        print("pip install pillow pillow-heif opencv-python")
         return
 
     app = MediaOrganizer()
