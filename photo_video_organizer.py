@@ -9,9 +9,11 @@ import shutil
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk, ExifTags
+HEIC_SUPPORTED = False
 try:
     from pillow_heif import register_heif_opener
     register_heif_opener()
+    HEIC_SUPPORTED = True
 except ImportError:
     pass
 import cv2
@@ -22,7 +24,10 @@ from datetime import datetime
 
 
 # Extensions supportées
-IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.heic', '.heif'}
+IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff'}
+HEIC_EXTENSIONS = {'.heic', '.heif'}
+if HEIC_SUPPORTED:
+    IMAGE_EXTENSIONS |= HEIC_EXTENSIONS
 VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v', '.3gp'}
 MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 
@@ -236,13 +241,18 @@ class MediaOrganizer:
         """Charge tous les fichiers médias des dossiers sélectionnés."""
         self.media_files = []
         errors = []
+        heic_skipped = 0
         for folder in folders:
             folder_path = Path(folder)
             try:
                 for file in folder_path.rglob('*'):
                     try:
-                        if file.is_file() and file.suffix.lower() in MEDIA_EXTENSIONS:
-                            self.media_files.append(file)
+                        if file.is_file():
+                            suffix = file.suffix.lower()
+                            if suffix in MEDIA_EXTENSIONS:
+                                self.media_files.append(file)
+                            elif not HEIC_SUPPORTED and suffix in HEIC_EXTENSIONS:
+                                heic_skipped += 1
                     except (PermissionError, OSError):
                         continue
             except (PermissionError, OSError) as e:
@@ -252,6 +262,15 @@ class MediaOrganizer:
             messagebox.showwarning(
                 "Avertissement",
                 f"Certains dossiers n'ont pas pu être lus:\n" + "\n".join(errors)
+            )
+
+        if heic_skipped > 0:
+            messagebox.showwarning(
+                "Fichiers HEIC ignorés",
+                f"{heic_skipped} fichier(s) HEIC/HEIF ignoré(s).\n\n"
+                "Le format HEIC nécessite la bibliothèque pillow-heif.\n"
+                "Installez-la avec :\n"
+                "pip install pillow-heif"
             )
 
         # Trier par date de prise de vue selon l'ordre choisi
@@ -409,7 +428,7 @@ class MediaOrganizer:
 
         suffix = current_file.suffix.lower()
 
-        if suffix in IMAGE_EXTENSIONS:
+        if suffix in IMAGE_EXTENSIONS or suffix in HEIC_EXTENSIONS:
             self._display_image(current_file, canvas_width, canvas_height)
         elif suffix in VIDEO_EXTENSIONS:
             self._display_video(current_file, canvas_width, canvas_height)
@@ -448,8 +467,15 @@ class MediaOrganizer:
             self.canvas.create_image(canvas_width // 2, canvas_height // 2,
                                      image=self.current_image, anchor=tk.CENTER)
         except Exception as e:
+            error_msg = f"Erreur: {e}"
+            if file_path.suffix.lower() in HEIC_EXTENSIONS and not HEIC_SUPPORTED:
+                error_msg = (
+                    f"Impossible d'ouvrir {file_path.name}\n\n"
+                    "Le format HEIC nécessite la bibliothèque pillow-heif.\n"
+                    "Installez-la avec : pip install pillow-heif"
+                )
             self.canvas.create_text(canvas_width // 2, canvas_height // 2,
-                                   text=f"Erreur: {e}", fill="white")
+                                   text=error_msg, fill="white", width=canvas_width - 40)
 
     def _display_video(self, file_path: Path, canvas_width: int, canvas_height: int):
         """Affiche la première frame d'une vidéo."""
