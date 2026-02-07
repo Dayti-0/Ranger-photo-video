@@ -8,7 +8,7 @@ import os
 import shutil
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ExifTags
 try:
     from pillow_heif import register_heif_opener
     register_heif_opener()
@@ -18,6 +18,7 @@ import cv2
 from pathlib import Path
 from typing import List, Optional
 import threading
+from datetime import datetime
 
 
 # Extensions supportées
@@ -42,6 +43,7 @@ class MediaOrganizer:
         self.current_image: Optional[ImageTk.PhotoImage] = None
         self.video_capture: Optional[cv2.VideoCapture] = None
         self.is_playing_video = False
+        self.sort_order = tk.StringVar(value="Chronologique (ancien → récent)")
 
         self._setup_ui()
         self._bind_shortcuts()
@@ -75,6 +77,21 @@ class MediaOrganizer:
                    command=self._delete_current).pack(side=tk.LEFT, padx=2)
         ttk.Button(control_frame, text="⏭ Passer (Espace)",
                    command=self._skip_media).pack(side=tk.LEFT, padx=2)
+
+        # Séparateur avant le tri
+        ttk.Separator(control_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
+
+        # Sélecteur d'ordre de tri
+        ttk.Label(control_frame, text="Tri:").pack(side=tk.LEFT, padx=(0, 2))
+        sort_combo = ttk.Combobox(
+            control_frame,
+            textvariable=self.sort_order,
+            values=["Chronologique (ancien → récent)", "Anti-chronologique (récent → ancien)"],
+            state="readonly",
+            width=32
+        )
+        sort_combo.pack(side=tk.LEFT, padx=2)
+        self.sort_order.trace_add("write", self._on_sort_order_changed)
 
         # Label de progression
         self.progress_label = ttk.Label(control_frame, text="0/0")
@@ -142,6 +159,61 @@ class MediaOrganizer:
         for i in range(1, 10):
             self.root.bind(str(i), lambda e, idx=i-1: self._move_to_folder_by_index(idx))
 
+    def _get_media_date(self, file_path: Path) -> datetime:
+        """Récupère la date de prise de vue d'un média.
+
+        Pour les images : utilise la date EXIF DateTimeOriginal ou DateTimeDigitized.
+        Pour les vidéos : utilise les métadonnées de date de création via OpenCV.
+        En dernier recours : utilise la date de modification du fichier.
+        """
+        suffix = file_path.suffix.lower()
+
+        # Images : extraire la date EXIF
+        if suffix in IMAGE_EXTENSIONS:
+            try:
+                image = Image.open(file_path)
+                exif_data = image._getexif()
+                if exif_data:
+                    # Tags EXIF pour la date de prise de vue
+                    # 36867 = DateTimeOriginal, 36868 = DateTimeDigitized, 306 = DateTime
+                    for tag_id in (36867, 36868, 306):
+                        date_str = exif_data.get(tag_id)
+                        if date_str:
+                            try:
+                                return datetime.strptime(date_str, "%Y:%m:%d %H:%M:%S")
+                            except (ValueError, TypeError):
+                                continue
+            except Exception:
+                pass
+
+        # Vidéos : essayer d'obtenir la date via les propriétés du fichier
+        # OpenCV ne fournit pas de métadonnées de date fiables,
+        # on se base sur la date de modification du fichier
+
+        # Fallback : date de modification du fichier
+        return datetime.fromtimestamp(file_path.stat().st_mtime)
+
+    def _sort_media(self):
+        """Trie les fichiers médias selon l'ordre sélectionné."""
+        chronologique = self.sort_order.get() == "Chronologique (ancien → récent)"
+        self.media_files.sort(
+            key=lambda x: self._get_media_date(x),
+            reverse=not chronologique
+        )
+
+    def _on_sort_order_changed(self, *args):
+        """Callback quand l'ordre de tri change."""
+        if self.media_files:
+            # Sauvegarder le fichier courant pour le retrouver après le tri
+            current_file = self.media_files[self.current_index] if self.current_index < len(self.media_files) else None
+            self._sort_media()
+            # Retrouver le fichier courant dans la nouvelle liste
+            if current_file and current_file in self.media_files:
+                self.current_index = self.media_files.index(current_file)
+            else:
+                self.current_index = 0
+            self._display_current_media()
+
     def _select_source_folders(self):
         """Permet de sélectionner les dossiers source."""
         folders = []
@@ -166,8 +238,8 @@ class MediaOrganizer:
                 if file.suffix.lower() in MEDIA_EXTENSIONS:
                     self.media_files.append(file)
 
-        # Trier par date de modification (plus récent en premier)
-        self.media_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        # Trier par date de prise de vue selon l'ordre choisi
+        self._sort_media()
 
         self.current_index = 0
         self._update_status(f"{len(self.media_files)} fichiers trouvés")
@@ -298,7 +370,9 @@ class MediaOrganizer:
             self.current_index = len(self.media_files) - 1
 
         current_file = self.media_files[self.current_index]
-        self.filename_label.config(text=current_file.name)
+        media_date = self._get_media_date(current_file)
+        date_str = media_date.strftime("%d/%m/%Y %H:%M:%S")
+        self.filename_label.config(text=f"{current_file.name}  —  {date_str}")
         self.progress_label.config(text=f"{self.current_index + 1}/{len(self.media_files)}")
 
         # Mettre à jour le canvas après affichage
