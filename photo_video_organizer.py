@@ -48,6 +48,7 @@ class MediaOrganizer:
         self.current_image: Optional[ImageTk.PhotoImage] = None
         self.video_capture: Optional[cv2.VideoCapture] = None
         self.is_playing_video = False
+        self.video_frame_delay = 33  # Default ~30fps, updated when video loads
         self.sort_order = tk.StringVar(value="Chronologique (ancien → récent)")
 
         self._setup_ui()
@@ -176,18 +177,18 @@ class MediaOrganizer:
         # Images : extraire la date EXIF
         if suffix in IMAGE_EXTENSIONS:
             try:
-                image = Image.open(file_path)
-                exif_data = image._getexif()
-                if exif_data:
-                    # Tags EXIF pour la date de prise de vue
-                    # 36867 = DateTimeOriginal, 36868 = DateTimeDigitized, 306 = DateTime
-                    for tag_id in (36867, 36868, 306):
-                        date_str = exif_data.get(tag_id)
-                        if date_str:
-                            try:
-                                return datetime.strptime(date_str, "%Y:%m:%d %H:%M:%S")
-                            except (ValueError, TypeError):
-                                continue
+                with Image.open(file_path) as image:
+                    exif_data = image._getexif()
+                    if exif_data:
+                        # Tags EXIF pour la date de prise de vue
+                        # 36867 = DateTimeOriginal, 36868 = DateTimeDigitized, 306 = DateTime
+                        for tag_id in (36867, 36868, 306):
+                            date_str = exif_data.get(tag_id)
+                            if date_str:
+                                try:
+                                    return datetime.strptime(date_str, "%Y:%m:%d %H:%M:%S")
+                                except (ValueError, TypeError):
+                                    continue
             except Exception:
                 pass
 
@@ -274,7 +275,14 @@ class MediaOrganizer:
             )
 
         # Trier par date de prise de vue selon l'ordre choisi
-        self._sort_media()
+        try:
+            self._sort_media()
+        except Exception as e:
+            messagebox.showwarning(
+                "Avertissement",
+                f"Erreur lors du tri des fichiers par date:\n{e}\n\n"
+                "Les fichiers seront affichés sans tri."
+            )
 
         self.current_index = 0
         self._update_status(f"{len(self.media_files)} fichiers trouvés")
@@ -406,6 +414,8 @@ class MediaOrganizer:
             self.progress_label.config(text="0/0")
             return
 
+        if self.current_index < 0:
+            self.current_index = 0
         if self.current_index >= len(self.media_files):
             self.current_index = len(self.media_files) - 1
 
@@ -453,7 +463,7 @@ class MediaOrganizer:
                         image = image.rotate(270, expand=True)
                     elif orientation_value == 8:
                         image = image.rotate(90, expand=True)
-            except (AttributeError, KeyError, IndexError):
+            except Exception:
                 pass
 
             # Redimensionner pour s'adapter au canvas
