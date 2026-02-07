@@ -191,7 +191,10 @@ class MediaOrganizer:
         # on se base sur la date de modification du fichier
 
         # Fallback : date de modification du fichier
-        return datetime.fromtimestamp(file_path.stat().st_mtime)
+        try:
+            return datetime.fromtimestamp(file_path.stat().st_mtime)
+        except (OSError, ValueError):
+            return datetime.min
 
     def _sort_media(self):
         """Trie les fichiers médias selon l'ordre sélectionné."""
@@ -232,11 +235,24 @@ class MediaOrganizer:
     def _load_media_from_folders(self, folders: List[str]):
         """Charge tous les fichiers médias des dossiers sélectionnés."""
         self.media_files = []
+        errors = []
         for folder in folders:
             folder_path = Path(folder)
-            for file in folder_path.rglob('*'):
-                if file.suffix.lower() in MEDIA_EXTENSIONS:
-                    self.media_files.append(file)
+            try:
+                for file in folder_path.rglob('*'):
+                    try:
+                        if file.is_file() and file.suffix.lower() in MEDIA_EXTENSIONS:
+                            self.media_files.append(file)
+                    except (PermissionError, OSError):
+                        continue
+            except (PermissionError, OSError) as e:
+                errors.append(f"{folder}: {e}")
+
+        if errors:
+            messagebox.showwarning(
+                "Avertissement",
+                f"Certains dossiers n'ont pas pu être lus:\n" + "\n".join(errors)
+            )
 
         # Trier par date de prise de vue selon l'ordre choisi
         self._sort_media()
@@ -258,9 +274,14 @@ class MediaOrganizer:
         if not self.destination_folder:
             return
 
-        self.subfolders = [d for d in self.destination_folder.iterdir() if d.is_dir()]
-        self.subfolders.sort(key=lambda x: x.name.lower())
-        self._refresh_folder_buttons()
+        try:
+            self.subfolders = [d for d in self.destination_folder.iterdir() if d.is_dir()]
+            self.subfolders.sort(key=lambda x: x.name.lower())
+            self._refresh_folder_buttons()
+        except (PermissionError, OSError) as e:
+            messagebox.showerror("Erreur", f"Impossible de lire le dossier destination:\n{e}")
+            self.subfolders = []
+            self._refresh_folder_buttons()
 
     def _create_subfolder(self):
         """Crée un nouveau sous-dossier dans la destination."""
@@ -370,9 +391,12 @@ class MediaOrganizer:
             self.current_index = len(self.media_files) - 1
 
         current_file = self.media_files[self.current_index]
-        media_date = self._get_media_date(current_file)
-        date_str = media_date.strftime("%d/%m/%Y %H:%M:%S")
-        self.filename_label.config(text=f"{current_file.name}  —  {date_str}")
+        try:
+            media_date = self._get_media_date(current_file)
+            date_str = media_date.strftime("%d/%m/%Y %H:%M:%S")
+            self.filename_label.config(text=f"{current_file.name}  —  {date_str}")
+        except Exception:
+            self.filename_label.config(text=f"{current_file.name}")
         self.progress_label.config(text=f"{self.current_index + 1}/{len(self.media_files)}")
 
         # Mettre à jour le canvas après affichage
@@ -414,8 +438,10 @@ class MediaOrganizer:
                 pass
 
             # Redimensionner pour s'adapter au canvas
+            if image.width == 0 or image.height == 0:
+                raise ValueError("Image de dimension nulle")
             ratio = min(canvas_width / image.width, canvas_height / image.height)
-            new_size = (int(image.width * ratio), int(image.height * ratio))
+            new_size = (max(1, int(image.width * ratio)), max(1, int(image.height * ratio)))
             image = image.resize(new_size, Image.Resampling.LANCZOS)
 
             self.current_image = ImageTk.PhotoImage(image)
@@ -452,8 +478,10 @@ class MediaOrganizer:
         image = Image.fromarray(frame_rgb)
 
         # Redimensionner
+        if image.width == 0 or image.height == 0:
+            return
         ratio = min(canvas_width / image.width, canvas_height / image.height)
-        new_size = (int(image.width * ratio), int(image.height * ratio))
+        new_size = (max(1, int(image.width * ratio)), max(1, int(image.height * ratio)))
         image = image.resize(new_size, Image.Resampling.LANCZOS)
 
         self.current_image = ImageTk.PhotoImage(image)
