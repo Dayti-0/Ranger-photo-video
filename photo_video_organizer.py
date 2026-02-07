@@ -14,8 +14,8 @@ try:
     from pillow_heif import register_heif_opener
     register_heif_opener()
     HEIC_SUPPORTED = True
-except ImportError:
-    pass
+except Exception as e:
+    print(f"[Info] Support HEIC/HEIF non disponible : {e}")
 import cv2
 from pathlib import Path
 from typing import List, Optional
