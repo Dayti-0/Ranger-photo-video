@@ -457,6 +457,13 @@ class MediaOrganizer:
             self.video_capture = cv2.VideoCapture(str(file_path))
             self.video_path = file_path
 
+            # Lire le FPS natif de la vidéo pour calculer le délai entre frames
+            fps = self.video_capture.get(cv2.CAP_PROP_FPS)
+            if fps and fps > 0:
+                self.video_frame_delay = int(1000 / fps)
+            else:
+                self.video_frame_delay = 33  # fallback ~30 fps
+
             # Lire la première frame
             ret, frame = self.video_capture.read()
             if ret:
@@ -513,8 +520,8 @@ class MediaOrganizer:
             current_frame = int(self.video_capture.get(cv2.CAP_PROP_POS_FRAMES))
             self.video_slider.set(current_frame)
 
-            # Continuer la lecture (environ 30 fps)
-            self.root.after(33, self._play_video_loop)
+            # Continuer la lecture au FPS natif de la vidéo
+            self.root.after(self.video_frame_delay, self._play_video_loop)
         else:
             # Fin de la vidéo
             self.is_playing_video = False
